@@ -7,13 +7,14 @@
 // except according to those terms.
 
 //#![feature(use_extern_macros)]
-extern crate gtk;
+extern crate env_logger;
 extern crate gdk;
+extern crate gtk;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate log;
 extern crate regex;
-#[macro_use] extern crate log;
-extern crate env_logger;
 
 pub mod ui;
 pub mod database;

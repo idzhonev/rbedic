@@ -7,31 +7,30 @@
 // except according to those terms.
 
 use gtk;
-use gtk::{main_quit, Window, WindowType, WindowExt, WidgetExt, ContainerExt, TreeViewExt, TreeModelExt,
-            TextBufferExt, TextIter, TreeStoreExt, TreeStoreExtManual, TreeSelectionExt, Inhibit,
-            EditableSignals, EntryExt, TreePath, ButtonExt};
-use gdk::CONTROL_MASK;
+use gtk::*;
+use gdk;
 use gdk::enums::key;
 use std::process;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::collections::HashMap;
 //use log;
 
-use super::{Header, Content};
+use super::{Content, Header};
 use database::DictDB;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
 pub struct App {
-    pub window:  Window,
-    pub header:  Header,
+    pub window: gtk::Window,
+    pub header: Header,
     pub content: Content,
-    pub history_dictdb: Arc<Mutex<Vec<DictDB>>>,
-    pub history_dictdb_unsorted: Arc<Mutex<Vec<DictDB>>>,
-    pub selection_isize: Arc<AtomicIsize>,
-    pub searched_hash: Arc<Mutex<HashMap<String, String>>>,
+    pub history_dictdb: Rc<Mutex<Vec<DictDB>>>,
+    pub history_dictdb_unsorted: Rc<Mutex<Vec<DictDB>>>,
+    pub selection_isize: Rc<AtomicIsize>,
+    pub searched_hash: Rc<Mutex<HashMap<String, String>>>,
 }
 
 /// A wrapped `App` which provides the capability to execute the program.
@@ -53,7 +52,7 @@ impl App {
             process::exit(1);
         }
         // Create a new top level window.
-        let window = Window::new(WindowType::Toplevel);
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
         // Create a the headerbar and it's associated content.
         let header = Header::new();
         // Create the content container and all of it's widgets.
@@ -67,7 +66,7 @@ impl App {
         window.set_wmclass("RBEdic", "RBEdic");
         // The icon the app will display.
         window.set_default_size(580, 310);
-        Window::set_default_icon_name("iconname");
+        gtk::Window::set_default_icon_name("iconname");
         // Add the content to the window.
         window.add(&content.container);
 
@@ -77,13 +76,26 @@ impl App {
             Inhibit(false)
         });
 
-        let history_dictdb = Arc::new(Mutex::new( Vec::new() ));
-        let history_dictdb_unsorted = Arc::new(Mutex::new( Vec::new() ));
-        let selection_isize = Arc::new(AtomicIsize::new(0));
-        let searched_hash = Arc::new(Mutex::new( HashMap::new() ));
-        info!("Running RBEdic v.{} with GTK v.{}.{}", VERSION,  gtk::get_major_version(), gtk::get_minor_version());
+        let history_dictdb = Rc::new(Mutex::new(Vec::new()));
+        let history_dictdb_unsorted = Rc::new(Mutex::new(Vec::new()));
+        let selection_isize = Rc::new(AtomicIsize::new(0));
+        let searched_hash = Rc::new(Mutex::new(HashMap::new()));
+        info!(
+            "Running RBEdic v{} with GTK v{}.{}",
+            VERSION,
+            gtk::get_major_version(),
+            gtk::get_minor_version()
+        );
         // Return the application structure.
-        App { window, header, content, history_dictdb, history_dictdb_unsorted, selection_isize, searched_hash }
+        App {
+            window,
+            header,
+            content,
+            history_dictdb,
+            history_dictdb_unsorted,
+            selection_isize,
+            searched_hash,
+        }
     }
 
     /// Creates external state, and maps all of the UI functionality to the UI.
@@ -95,13 +107,12 @@ impl App {
         let history_dictdb_unsorted = self.history_dictdb_unsorted.clone();
         // External state to share across events.
         // Keep track of whether we are fullscreened or not.
-        let fullscreen = Arc::new(AtomicBool::new(false));
+        let fullscreen = Rc::new(AtomicBool::new(false));
         let button_add_2_history = content_clonned.s_bar.add_2_history;
         {
             let button_history = content_clonned.s_bar.history;
             button_history.set_sensitive(false);
             button_add_2_history.set_sensitive(false);
-
 
             // Connect all of the events that this UI will act upon.
             self.about_event();
@@ -113,39 +124,46 @@ impl App {
         let app = self;
         let app_clonned = app.clone();
         let vec_dict_db = DictDB::new();
-        content_clonned.s_bar.search_entry.connect_changed(move |search_selection| {
-            let search_text_len = search_selection.get_text_length();
-            if search_text_len > 0  && search_text_len < 51 {
-                let search_text = search_selection.get_text();
-                {
-                    debug!("connect_events: Clear searched_hash");
-                    let mut searched_hash_locked = app_clonned.searched_hash.lock().unwrap();
-                    searched_hash_locked.clear();
+        content_clonned
+            .s_bar
+            .search_entry
+            .connect_changed(move |search_selection| {
+                let search_text_len = search_selection.get_text_length();
+                if search_text_len > 0 && search_text_len < 51 {
+                    let search_text = search_selection.get_text();
+                    {
+                        debug!("connect_events: Clear searched_hash");
+                        let mut searched_hash_locked = app_clonned.searched_hash.lock().unwrap();
+                        searched_hash_locked.clear();
+                    }
+                    match search_text {
+                        Some(txt) => {
+                            trace!("Search txt: {:?}", txt);
+                            // Search into databases
+                            match DictDB::search(&txt, &vec_dict_db) {
+                                Ok(vec_result) => {
+                                    // Success
+                                    trace!("Search into DB is Ok: {:?}", vec_result);
+                                    // Write to GUI
+                                    app_clonned.selection(&vec_result, false);
+                                }
+                                Err(vec_result_err) => {
+                                    trace!(
+                                        "Error: Can not find the exact word: {:?}",
+                                        vec_result_err
+                                    );
+                                    if vec_result_err.len() == 0 {
+                                        button_add_2_history.set_sensitive(false);
+                                    };
+                                    // Write to GUI
+                                    app_clonned.selection(&vec_result_err, false);
+                                }
+                            };
+                        }
+                        None => trace!("None"),
+                    };
                 }
-                match search_text {
-                    Some(txt) => {
-                        trace!("Search txt: {:?}", txt);
-                        // Search into databases
-                        match DictDB::search(&txt, &vec_dict_db) {
-                            Ok(vec_result) => {
-                                // Success
-                                trace!("Search into DB is Ok: {:?}", vec_result);
-                                // Write to GUI
-                                app_clonned.selection(&vec_result, false);
-
-                            },
-                            Err(vec_result_err) => {
-                                trace!("Error: Can not find the exact word: {:?}", vec_result_err);
-                                if vec_result_err.len() == 0 { button_add_2_history.set_sensitive(false); };
-                                // Write to GUI
-                                app_clonned.selection(&vec_result_err, false);
-                            },
-                        };
-                    },
-                    None => trace!("None")
-                };
-            }
-        });
+            });
         // Wrap the `App` within `ConnectedApp` to enable the developer to execute the program.
         ConnectedApp(app)
     }
@@ -154,8 +172,7 @@ impl App {
     /// are pressed on the keyboard.
     fn key_events(
         &self,
-    //  current_file: Arc<RwLock<Option<ActiveMetadata>>>,
-        fullscreen: Arc<AtomicBool>,
+        fullscreen: Rc<AtomicBool>,
     ) {
         // Grab required references beforehand.
         let add_2_history_button = self.content.s_bar.add_2_history.clone();
@@ -171,7 +188,7 @@ impl App {
                     window.fullscreen();
                 },
                 // View History when ctrl+d is pressed.
-                key if key == 'd' as u32 && gdk.get_state().contains(CONTROL_MASK) => {
+                key if key == 'd' as u32 && gdk.get_state().contains(gdk::ModifierType::CONTROL_MASK) => {
                     trace!("Pressed CTRL+h");
                     let history_len: usize;
                     {
@@ -182,12 +199,12 @@ impl App {
                     if history_len > 0 {
                         history_button.clicked();
                     }
-                },
+                }
                 // Add to History when ctrl+s is pressed.
-                key if key == 's' as u32 && gdk.get_state().contains(CONTROL_MASK) => {
+                key if key == 's' as u32 && gdk.get_state().contains(gdk::ModifierType::CONTROL_MASK) => {
                     trace!("Pressed CTRL+s");
                     add_2_history_button.clicked();
-                },
+                }
                 _ => (),
             }
             Inhibit(false)
@@ -197,7 +214,7 @@ impl App {
     /// Program About button
     fn about_event(&self) {
         let button_about = self.header.about.clone();
-        let content_clonned = self.content.clone(); 
+        let content_clonned = self.content.clone();
         let history_dictdb = self.history_dictdb.clone();
         let button_add_2_history = content_clonned.s_bar.add_2_history.clone();
         let button_history = content_clonned.s_bar.history.clone();
@@ -205,7 +222,7 @@ impl App {
         let right_buff = content_clonned.inner_paned.translation.buff.clone();
         let about_text = "
   This is RBEdic - Bulgarian-English two-way dictionary,
-written in Rust with GTK and analogous of KBE Dictionary.
+written in Rust with GTK and analogous to KBE Dictionary.
 
     Version: 0.1.0
 
@@ -236,13 +253,13 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
             right_buff.set_text(&about_text);
             {
                 let history_dictdb_locked = history_dictdb.lock().unwrap();
-                if history_dictdb_locked.len() > 0 { button_history.set_sensitive(true); };
+                if history_dictdb_locked.len() > 0 {
+                    button_history.set_sensitive(true);
+                };
             }
-        
         });
-
     }
-    
+
     /// Program History button
     fn history_event(&self) {
         let content = self.content.clone();
@@ -258,13 +275,18 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
                 searched_hash_locked.clear();
             }
             {
-                let mut history_dictdb_unsorted = app_clonned.history_dictdb_unsorted.lock().unwrap();
+                let mut history_dictdb_unsorted =
+                    app_clonned.history_dictdb_unsorted.lock().unwrap();
                 history_dictdb_unsorted.reverse();
-                trace!("history_event: history_data -> {:?}", history_dictdb_unsorted);
+                trace!(
+                    "history_event: history_data -> {:?}",
+                    history_dictdb_unsorted
+                );
                 app_clonned.selection(&history_dictdb_unsorted, true);
             }
             {
-                let mut history_dictdb_unsorted = app_clonned.history_dictdb_unsorted.lock().unwrap();
+                let mut history_dictdb_unsorted =
+                    app_clonned.history_dictdb_unsorted.lock().unwrap();
                 history_dictdb_unsorted.reverse();
             }
             search_entry.grab_focus();
@@ -272,7 +294,11 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
     }
 
     /// Program add_2_history button
-    fn add_2_history_event(&self, history_dictdb: Arc<Mutex<Vec<DictDB>>>, history_dictdb_unsorted: Arc<Mutex<Vec<DictDB>>>) {
+    fn add_2_history_event(
+        &self,
+        history_dictdb: Rc<Mutex<Vec<DictDB>>>,
+        history_dictdb_unsorted: Rc<Mutex<Vec<DictDB>>>,
+    ) {
         let right_buff = self.content.inner_paned.translation.buff.clone();
         let left_selection = self.content.inner_paned.words.tree_view.get_selection();
         let button_history = &self.content.s_bar.history;
@@ -287,21 +313,21 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
             // Get left tree_view selection value
             let left_selection_value: String = match left_selection.get_selected() {
                 Some((left_model, iter)) => {
-                    match left_model.get_value(&iter,0).get::<String>() {
+                    match left_model.get_value(&iter, 0).get::<String>() {
                         Some(value_string) => {
                             trace!("add_2_history_event: Selected -> {}", value_string);
                             //button_history_clonned.set_sensitive(true);
-                                //button_add_2_history_clonned.set_sensitive(true);
+                            //button_add_2_history_clonned.set_sensitive(true);
                             value_string
-                        },
-                        _ =>    {
+                        }
+                        _ => {
                             trace!("add_2_history_event: Warn: left_model.get_value() == _");
                             button_add_2_history_clonned.set_sensitive(false);
                             "empty _".to_string()
                         }
                     }
-                },
-                 None => {
+                }
+                None => {
                     trace!("add_2_history_event: Can not get selected. Exit from this method.");
                     button_add_2_history_clonned.set_sensitive(false);
                     "add_2_history_event: Can not get selected".to_string();
@@ -312,246 +338,291 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
             let mut history_dictdb = history_dictdb.lock().unwrap();
             let mut history_dictdb_unsorted = history_dictdb_unsorted.lock().unwrap();
             history_dictdb.sort();
-            let search_struct = DictDB {word: left_selection_value.clone(), translation: "__".to_string() };
+            let search_struct = DictDB {
+                word: left_selection_value.clone(),
+                translation: "__".to_string(),
+            };
             // Search for duplicates and set the button Add
             match history_dictdb.binary_search(&search_struct) {
                 Ok(_index) => {
                     trace!("add_2_history_event: bin search OK -> {}", _index);
                     button_add_2_history_clonned.set_sensitive(false);
-                },
+                }
                 Err(_index_err) => {
-                        button_history_clonned.set_sensitive(true);
-                        button_add_2_history_clonned.set_sensitive(false);
-                        let iter1: TextIter = right_buff.get_start_iter();
-                        let iter2: TextIter = right_buff.get_end_iter();
-                        let right_buff_text = right_buff.get_text( &iter1, &iter2, false).unwrap();
-                        // Print to standard out
-                        println!("------------------------------------------------------------------------------");
-                        println!("{}", right_buff_text);
-                        let dictdb_entry = DictDB {word: left_selection_value.clone(), translation: right_buff_text.to_string() };
-                        history_dictdb.push(dictdb_entry.clone());
-                        history_dictdb.sort();
-                        history_dictdb_unsorted.push(dictdb_entry.clone());
-                        search_entry_clonned.grab_focus();
-                        selection_atomic_isize.store(400, Ordering::SeqCst);
+                    button_history_clonned.set_sensitive(true);
+                    button_add_2_history_clonned.set_sensitive(false);
+                    let iter1: TextIter = right_buff.get_start_iter();
+                    let iter2: TextIter = right_buff.get_end_iter();
+                    let right_buff_text = right_buff.get_text(&iter1, &iter2, false).unwrap();
+                    // Print to standard out
+                    println!("------------------------------------------------------------------------------");
+                    println!("{}", right_buff_text);
+                    let dictdb_entry = DictDB {
+                        word: left_selection_value.clone(),
+                        translation: right_buff_text.to_string(),
+                    };
+                    history_dictdb.push(dictdb_entry.clone());
+                    history_dictdb.sort();
+                    history_dictdb_unsorted.push(dictdb_entry.clone());
+                    search_entry_clonned.grab_focus();
+                    selection_atomic_isize.store(400, Ordering::SeqCst);
                 }
             };
-
         });
     }
 
-  #[inline(always)]
-  fn selection(&self, vec_dict_db: &Vec<DictDB>, history_mode: bool) {
-    let content = &self.content;
-    let content_clonned = content.clone();
+    #[inline(always)]
+    fn selection(&self, vec_dict_db: &Vec<DictDB>, history_mode: bool) {
+        let content = &self.content;
+        let content_clonned = content.clone();
 
-    let left_tree = content_clonned.inner_paned.words.tree_view.clone();
-    let right_buff = content_clonned.inner_paned.translation.buff.clone();
-    let button_add_2_history = content_clonned.s_bar.add_2_history.clone();
-    let button_history = content_clonned.s_bar.history.clone();
-    // selection
-    let left_selection = left_tree.get_selection();
-    let left_selection_clonned = left_selection.clone();
-        
-    let vec_dict_db_loop: &Vec<DictDB>;
-    trace!("selection: history_mode bool == {}", history_mode);
-    let app1 = self.clone();
-    if history_mode {
-      button_history.set_sensitive(false);
-      button_add_2_history.set_sensitive(false);
-      vec_dict_db_loop = vec_dict_db;
-    } else {
-      button_history.set_sensitive(true);
-      vec_dict_db_loop = vec_dict_db;
-      {
-        let history_dictdb_locked = app1.history_dictdb.lock().unwrap();
-        if history_dictdb_locked.len() == 0 { button_history.set_sensitive(false); };
-      }
-    }
-    // Clear the TreeStore
-    content.inner_paned.words.tree_store.clear();
+        let left_tree = content_clonned.inner_paned.words.tree_view.clone();
+        let right_buff = content_clonned.inner_paned.translation.buff.clone();
+        let button_add_2_history = content_clonned.s_bar.add_2_history.clone();
+        let button_history = content_clonned.s_bar.history.clone();
+        // selection
+        let left_selection = left_tree.get_selection();
+        let left_selection_clonned = left_selection.clone();
 
-    // Fill searched_hash
-    {
-      let mut j = 1; 
-      trace!("selection: searched_hash -> MUTEX LOCK before for loop");
-      let mut searched_hash_locked = app1.searched_hash.lock().unwrap();
-      debug!("selection: before for loop: searched_hash LEN == {}", searched_hash_locked.len());
-      for i in vec_dict_db_loop {
-          // insert_with_values takes two slices: column indices and ToValue
-          // trait objects. ToValue is implemented for strings, numeric types,
-          // bool and Object descendants
-          content.inner_paned.words.tree_store.insert_with_values(None, None, &[0], &[&format!("{}", &i.word)]);
-          //trace!("selection: for loop: Insert into searched_hash {} -> {}", i.clone().word, i.clone().translation);
-          searched_hash_locked.insert(i.clone().word, i.clone().translation);
-          // Set cursor on first item
-          if j == 1 {
-            // Selection
-            let path_default = TreePath::new_first();
-            left_selection_clonned.select_path(&path_default);
-            left_tree.set_cursor(&path_default, None, false);
-            right_buff.set_text(&i.translation.as_str());
-            // Search for duplicates into history data and set Add button sensitivity
-            // if history_mode == true -> history_data == vec_dict_db
-            // else  history_data = history_dictdb with mutex
-            let search_struct = DictDB {word: i.clone().word , translation: "___".to_string()};
-            if history_mode {
-                    //let history_data = vec_dict_db; 
-                    match vec_dict_db.binary_search(&search_struct) {
-                        Ok(_index) => {
-                            trace!("selection: into loop history mode: Ok: {:?}", vec_dict_db[_index]);
-                            button_add_2_history.set_sensitive(false);
-                        },
-                        Err(_index_err) => {
-                            trace!("selection: into loop history mode: Err for -> {:?}", search_struct);
-                            button_add_2_history.set_sensitive(true);
-                        }
-                    };
-            } else {
-                    {
-                        let history_dictdb = app1.history_dictdb.lock().unwrap();
-                        //history_dictdb.sort();
-                        debug!("selection: for loop history_len");
-                        if history_dictdb.len() == 0 {
-                            button_history.set_sensitive(false);
-                        }
-                        match history_dictdb.binary_search(&search_struct) {
-                            Ok(index) => {
-                                trace!("selection: into loop Ok: {:?}", index);
-                                button_add_2_history.set_sensitive(false);
-                            },
-                            Err(_index_err) => {
-                                trace!("selection: into loop Err for -> {:?}", search_struct);
-                                button_add_2_history.set_sensitive(true);
-                            }
-                        }; 
-                      }
-                }
-          }
-          j += 1;
-      }
-    // Fill searched_hash _END_
-    }
-
-    let selection_atomic_isize = self.selection_isize.clone();
-    let selection_atomic_isize_1 = selection_atomic_isize.load(Ordering::SeqCst);
-    if selection_atomic_isize_1 < -99 {
-        trace!("selection: RETURN from method because selection_atomic_isize_1 < -99 -> {}", selection_atomic_isize_1);
+        let vec_dict_db_loop: &Vec<DictDB>;
+        trace!("selection: history_mode bool == {}", history_mode);
+        let app1 = self.clone();
         if history_mode {
+            button_history.set_sensitive(false);
             button_add_2_history.set_sensitive(false);
-        }
-        return;
-    } else {
-      // On change selected row
-      let app = self.clone();
-      let app2 = self.clone();
-      if history_mode {
-        button_add_2_history.set_sensitive(false);
-      } else {
-        {
-            let history_dictdb = app.history_dictdb.lock().unwrap();
-            debug!("selection: connect_changed: history_len");
-            if history_dictdb.len() == 0 {
-                button_history.set_sensitive(false);
+            vec_dict_db_loop = vec_dict_db;
+        } else {
+            button_history.set_sensitive(true);
+            vec_dict_db_loop = vec_dict_db;
+            {
+                let history_dictdb_locked = app1.history_dictdb.lock().unwrap();
+                if history_dictdb_locked.len() == 0 {
+                    button_history.set_sensitive(false);
+                };
             }
         }
-      }
-      let selection_atomic_isize = app.selection_isize.clone();
-      {
-        left_selection.connect_changed(move |tree_selection| {
-            match tree_selection.get_selected() {
-                Some((left_model, iter)) => {
-                    trace!("selection: connect_changed: ATOMICISIZE {:?}", selection_atomic_isize);
-                    match left_model.get_value(&iter,0).get::<String>() {
-                        Some(value_string) => {
-                            let value_string_owned = value_string.to_owned();
-                            let value_str = value_string.as_str();
-                            let mut path = left_model.get_path(&iter).expect("Couldn't get path");
-                            // get the top-level element path
-                            while path.get_depth() > 1 {
-                                path.up();
+        // Clear the TreeStore
+        content.inner_paned.words.tree_store.clear();
+
+        // Fill searched_hash
+        {
+            let mut j = 1;
+            trace!("selection: searched_hash -> MUTEX LOCK before for loop");
+            let mut searched_hash_locked = app1.searched_hash.lock().unwrap();
+            debug!(
+                "selection: before for loop: searched_hash LEN == {}",
+                searched_hash_locked.len()
+            );
+            for i in vec_dict_db_loop {
+                // insert_with_values takes two slices: column indices and ToValue
+                // trait objects. ToValue is implemented for strings, numeric types,
+                // bool and Object descendants
+                content.inner_paned.words.tree_store.insert_with_values(
+                    None,
+                    None,
+                    &[0],
+                    &[&format!("{}", &i.word)],
+                );
+                //trace!("selection: for loop: Insert into searched_hash {} -> {}", i.clone().word, i.clone().translation);
+                searched_hash_locked.insert(i.clone().word, i.clone().translation);
+                // Set cursor on first item
+                if j == 1 {
+                    // Selection
+                    let path_default = TreePath::new_first();
+                    left_selection_clonned.select_path(&path_default);
+                    left_tree.set_cursor(&path_default, None, false);
+                    right_buff.set_text(&i.translation.as_str());
+                    // Search for duplicates into history data and set Add button sensitivity
+                    // if history_mode == true -> history_data == vec_dict_db
+                    // else  history_data = history_dictdb with mutex
+                    let search_struct = DictDB {
+                        word: i.clone().word,
+                        translation: "___".to_string(),
+                    };
+                    if history_mode {
+                        //let history_data = vec_dict_db;
+                        match vec_dict_db.binary_search(&search_struct) {
+                            Ok(_index) => {
+                                trace!(
+                                    "selection: into loop history mode: Ok: {:?}",
+                                    vec_dict_db[_index]
+                                );
+                                button_add_2_history.set_sensitive(false);
                             }
-                            left_selection_clonned.select_path(&path);
-                            left_tree.set_cursor(&path, None, false);
-                            // Get hash value and write to right_buff
-                            let sai = selection_atomic_isize.load(Ordering::SeqCst);
-                            trace!("selection: connect_changed: searched_hash and value_str == -> {}, sai == {}", value_str, sai);
-                              {
-                                match app2.searched_hash.try_lock(){
-                                    Ok(searched_hash_locked_1) => {
-                                        trace!("selection: connect_changed: searched_hash MUTEX LOCK before searched_hash");
-                                        match searched_hash_locked_1.get(value_str) {
-                                            Some(s) => {
-                                                trace!("selection: connect_changed: Success: Searched hash key -> {}", value_str);
-                                                debug!("selection: connect_changed: searched_hash LEN == {}", searched_hash_locked_1.len());
-                                                right_buff.set_text(&s);
-                                            },
-                                            None => {
-                                                trace!("selection: connect_changed: Warn: Searched hash returned Option is None and value_str -> {}", value_str);
-                                                //right_buff.set_text(value_str);
-                                                right_buff.set_text("");
-                                                {
-                                                    let history_dictdb_locked = app.history_dictdb.lock().unwrap();
-                                                    if history_dictdb_locked.len() == 0 { button_history.set_sensitive(false); };
-                                                }
-                                                selection_atomic_isize.store(-300, Ordering::SeqCst);
+                            Err(_index_err) => {
+                                trace!(
+                                    "selection: into loop history mode: Err for -> {:?}",
+                                    search_struct
+                                );
+                                button_add_2_history.set_sensitive(true);
+                            }
+                        };
+                    } else {
+                        {
+                            let history_dictdb = app1.history_dictdb.lock().unwrap();
+                            //history_dictdb.sort();
+                            debug!("selection: for loop history_len");
+                            if history_dictdb.len() == 0 {
+                                button_history.set_sensitive(false);
+                            }
+                            match history_dictdb.binary_search(&search_struct) {
+                                Ok(index) => {
+                                    trace!("selection: into loop Ok: {:?}", index);
+                                    button_add_2_history.set_sensitive(false);
+                                }
+                                Err(_index_err) => {
+                                    trace!("selection: into loop Err for -> {:?}", search_struct);
+                                    button_add_2_history.set_sensitive(true);
+                                }
+                            };
+                        }
+                    }
+                }
+                j += 1;
+            }
+            // Fill searched_hash _END_
+        }
+
+        let selection_atomic_isize = self.selection_isize.clone();
+        let selection_atomic_isize_1 = selection_atomic_isize.load(Ordering::SeqCst);
+        if selection_atomic_isize_1 < -99 {
+            trace!(
+                "selection: RETURN from method because selection_atomic_isize_1 < -99 -> {}",
+                selection_atomic_isize_1
+            );
+            if history_mode {
+                button_add_2_history.set_sensitive(false);
+            }
+            return;
+        } else {
+            // On change selected row
+            let app = self.clone();
+            let app2 = self.clone();
+            if history_mode {
+                button_add_2_history.set_sensitive(false);
+            } else {
+                {
+                    let history_dictdb = app.history_dictdb.lock().unwrap();
+                    debug!("selection: connect_changed: history_len");
+                    if history_dictdb.len() == 0 {
+                        button_history.set_sensitive(false);
+                    }
+                }
+            }
+            let selection_atomic_isize = app.selection_isize.clone();
+            {
+                left_selection.connect_changed(move |tree_selection| {
+                    match tree_selection.get_selected() {
+                        Some((left_model, iter)) => {
+                            trace!(
+                                "selection: connect_changed: ATOMICISIZE {:?}",
+                                selection_atomic_isize
+                            );
+                            match left_model.get_value(&iter, 0).get::<String>() {
+                                Some(value_string) => {
+                                    let value_string_owned = value_string.to_owned();
+                                    let value_str = value_string.as_str();
+                                    let mut path =
+                                        left_model.get_path(&iter).expect("Couldn't get path");
+                                    // get the top-level element path
+                                    while path.get_depth() > 1 {
+                                        path.up();
+                                    }
+                                    left_selection_clonned.select_path(&path);
+                                    left_tree.set_cursor(&path, None, false);
+                                    // Get hash value and write to right_buff
+                                    let sai = selection_atomic_isize.load(Ordering::SeqCst);
+                                    trace!("selection: connect_changed: searched_hash and value_str == -> {}, sai == {}", value_str, sai);
+                                    {
+                                        match app2.searched_hash.try_lock() {
+                                            Ok(searched_hash_locked_1) => {
+                                                trace!("selection: connect_changed: searched_hash MUTEX LOCK before searched_hash");
+                                                match searched_hash_locked_1.get(value_str) {
+                                                    Some(s) => {
+                                                        trace!("selection: connect_changed: Success: Searched hash key -> {}", value_str);
+                                                        debug!("selection: connect_changed: searched_hash LEN == {}", searched_hash_locked_1.len());
+                                                        right_buff.set_text(&s);
+                                                    }
+                                                    None => {
+                                                        trace!("selection: connect_changed: Warn: Searched hash returned Option is None and value_str -> {}", value_str);
+                                                        //right_buff.set_text(value_str);
+                                                        right_buff.set_text("");
+                                                        {
+                                                            let history_dictdb_locked =
+                                                                app.history_dictdb.lock().unwrap();
+                                                            if history_dictdb_locked.len() == 0 {
+                                                                button_history.set_sensitive(false);
+                                                            };
+                                                        }
+                                                        selection_atomic_isize
+                                                            .store(-300, Ordering::SeqCst);
+                                                    }
+                                                };
+                                            }
+                                            Err(err) => {
+                                                trace!("selection: connect_changed: MUTEX LOCK before searched_hash ERROR -> {}", err);
                                             }
                                         };
-                                    },
-                                    Err(err) => {
-                                        trace!("selection: connect_changed: MUTEX LOCK before searched_hash ERROR -> {}", err);
                                     }
-                                };
-                              }
-                              let selection_atomic_isize_2 = selection_atomic_isize.load(Ordering::SeqCst);
-                              if selection_atomic_isize_2 < -399 {
-                                trace!("******** return ******** < -299 -> {}", selection_atomic_isize_2);
-                                trace!("selection: connect_changed: RETURN from method because selection_atomic_isize_2 < -99 -> {}", selection_atomic_isize_2);
-                                return;
-                              } else {
-                                let search_struct = DictDB {word: value_string_owned , translation: "___".to_string()};
-                                if history_mode == false {
-                                  trace!("selection: connect_changed: history_mode {} and ATOMICISIZE BEFORE binary_search -> {:?}", history_mode, selection_atomic_isize);
-                                  {
-                                    let history_dictdb = app.history_dictdb.lock().unwrap();
-                                    //history_dictdb.sort();
-                                    match history_dictdb.binary_search(&search_struct) {
-                                        Ok(_index) => {
-                                            trace!("selection: connect_changed: bin_search Ok: {:?}", history_dictdb[_index]);
-                                            // Workaround
-                                            right_buff.set_text(&history_dictdb[_index].translation);
-                                            button_add_2_history.set_sensitive(false);
-                                        },
-                                        Err(_index_err) => {
-                                            trace!("selection: connect_changed: bin_search Err for -> {:?}", search_struct);
-                                            button_add_2_history.set_sensitive(true);
-                                            selection_atomic_isize.store(-100, Ordering::SeqCst);
-                                            trace!("selection: connect_changed: ERR ATOMICISIZE AFTER binary_search ->{:?}", selection_atomic_isize);
+                                    let selection_atomic_isize_2 =
+                                        selection_atomic_isize.load(Ordering::SeqCst);
+                                    if selection_atomic_isize_2 < -399 {
+                                        trace!(
+                                            "******** return ******** < -299 -> {}",
+                                            selection_atomic_isize_2
+                                        );
+                                        trace!("selection: connect_changed: RETURN from method because selection_atomic_isize_2 < -99 -> {}", selection_atomic_isize_2);
+                                        return;
+                                    } else {
+                                        let search_struct = DictDB {
+                                            word: value_string_owned,
+                                            translation: "___".to_string(),
+                                        };
+                                        if history_mode == false {
+                                            trace!("selection: connect_changed: history_mode {} and ATOMICISIZE BEFORE binary_search -> {:?}", history_mode, selection_atomic_isize);
+                                            {
+                                                let history_dictdb =
+                                                    app.history_dictdb.lock().unwrap();
+                                                //history_dictdb.sort();
+                                                match history_dictdb.binary_search(&search_struct) {
+                                                    Ok(_index) => {
+                                                        trace!("selection: connect_changed: bin_search Ok: {:?}", history_dictdb[_index]);
+                                                        // Workaround
+                                                        right_buff.set_text(
+                                                            &history_dictdb[_index].translation,
+                                                        );
+                                                        button_add_2_history.set_sensitive(false);
+                                                    }
+                                                    Err(_index_err) => {
+                                                        trace!("selection: connect_changed: bin_search Err for -> {:?}", search_struct);
+                                                        button_add_2_history.set_sensitive(true);
+                                                        selection_atomic_isize
+                                                            .store(-100, Ordering::SeqCst);
+                                                        trace!("selection: connect_changed: ERR ATOMICISIZE AFTER binary_search ->{:?}", selection_atomic_isize);
+                                                    }
+                                                };
+                                            }
+                                        } else {
+                                            //button_history.set_sensitive(false);
+                                            selection_atomic_isize.store(-200, Ordering::SeqCst);
                                         }
-                                    };
-                                  }
-                                } else {
-                                    //button_history.set_sensitive(false);
-                                    selection_atomic_isize.store(-200, Ordering::SeqCst);
+                                    }
                                 }
-                              } 
-                            },
-                            _ => {
+                                _ => {
                                     trace!("selection: connect_changed: Warn: left_model.get_value() == _");
                                     button_add_2_history.set_sensitive(true);
                                     selection_atomic_isize.store(1, Ordering::SeqCst);
-                            }
-                        };
-                },
-                None => {
-                    trace!("selection: connect_changed: Can not get selected");
-                    button_add_2_history.set_sensitive(false);
-                    
-                }
-            };
-          });
+                                }
+                            };
+                        }
+                        None => {
+                            trace!("selection: connect_changed: Can not get selected");
+                            button_add_2_history.set_sensitive(false);
+                        }
+                    };
+                });
+            }
         }
+        // selection _END_
     }
-  // selection _END_
-  }
 }

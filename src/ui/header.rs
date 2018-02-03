@@ -6,12 +6,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use gtk::{HeaderBar, HeaderBarExt, Button, WidgetExt};
+use gtk::{Button, HeaderBar, HeaderBarExt, WidgetExt};
 
 #[derive(Clone)]
 pub struct Header {
-    pub container:  HeaderBar,
-    pub about:      Button,
+    pub container: HeaderBar,
+    pub about: Button,
 }
 
 impl Header {

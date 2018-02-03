@@ -6,44 +6,45 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use gtk::{Box, SearchEntry, Button, Paned, ScrolledWindow, TreeView, TreeStore, TextView, TextBuffer,
-            Orientation, WrapMode, TreeViewColumn, CellRendererText, ContainerExt, TextViewExt,
-            WidgetExt, EntryExt, PanedExt, StaticType, TreeViewExt, CellLayoutExt, StyleContextExt};
+use gtk::{Box, Button, CellLayoutExt, CellRendererText, ContainerExt, EntryExt, Orientation,
+          Paned, PanedExt, ScrolledWindow, SearchEntry, StaticType, StyleContextExt, TextBuffer,
+          TextView, TextViewExt, TreeStore, TreeView, TreeViewColumn, TreeViewExt, WidgetExt,
+          WrapMode};
 
 #[derive(Clone)]
 pub struct Content {
-    pub container:      Box,
-    pub s_bar:          SBar,
-    pub inner_paned:    InnerPaned,
+    pub container: Box,
+    pub s_bar: SBar,
+    pub inner_paned: InnerPaned,
 }
 
 #[derive(Clone)]
 pub struct SBar {
-    pub container:      Box,
-    pub search_entry:   SearchEntry,
-    pub history:        Button,
-    pub add_2_history:  Button,
+    pub container: Box,
+    pub search_entry: SearchEntry,
+    pub history: Button,
+    pub add_2_history: Button,
 }
 
 #[derive(Clone)]
 pub struct InnerPaned {
-    pub container:      Paned,
-    pub words:          Words,
-    pub translation:    Translation,
+    pub container: Paned,
+    pub words: Words,
+    pub translation: Translation,
 }
 
 #[derive(Clone)]
 pub struct Words {
-    pub container:      ScrolledWindow,
-    pub tree_view:      TreeView,
-    pub tree_store:     TreeStore,
+    pub container: ScrolledWindow,
+    pub tree_view: TreeView,
+    pub tree_store: TreeStore,
 }
 
 #[derive(Clone)]
 pub struct Translation {
-    pub container:  ScrolledWindow,
-    pub text_view:  TextView,
-    pub buff:       TextBuffer,
+    pub container: ScrolledWindow,
+    pub text_view: TextView,
+    pub buff: TextBuffer,
 }
 
 impl Content {
@@ -57,7 +58,11 @@ impl Content {
         container.add(&inner_paned.container);
         container.set_vexpand(true);
 
-        Content { container, s_bar, inner_paned }
+        Content {
+            container,
+            s_bar,
+            inner_paned,
+        }
     }
 }
 
@@ -69,7 +74,9 @@ impl SBar {
         let history = Button::new_with_mnemonic("_History");
         history.set_tooltip_text("View history. CTRL+d");
         let add_2_history = Button::new_with_mnemonic("_Add");
-        add_2_history.get_style_context().map(|x| x.add_class("suggested-action"));
+        add_2_history
+            .get_style_context()
+            .map(|x| x.add_class("suggested-action"));
         add_2_history.set_tooltip_text("Add word to history. CTRL+s");
 
         container.set_hexpand(true);
@@ -79,7 +86,12 @@ impl SBar {
         container.add(&history);
         container.add(&add_2_history);
 
-        SBar { container, search_entry, history, add_2_history }
+        SBar {
+            container,
+            search_entry,
+            history,
+            add_2_history,
+        }
     }
 }
 
@@ -98,7 +110,11 @@ impl InnerPaned {
         translation.container.set_size_request(100, -1);
         container.set_vexpand(true);
 
-        InnerPaned { container, words, translation }
+        InnerPaned {
+            container,
+            words,
+            translation,
+        }
     }
 }
 
@@ -114,7 +130,11 @@ impl Words {
         append_text_column(&tree_view);
         container.add(&tree_view);
 
-        Words { container, tree_view, tree_store }
+        Words {
+            container,
+            tree_view,
+            tree_store,
+        }
     }
 }
 
@@ -131,7 +151,11 @@ impl Translation {
         let container = ScrolledWindow::new(None, None);
         container.add(&text_view);
 
-        Translation { container, text_view, buff }
+        Translation {
+            container,
+            text_view,
+            buff,
+        }
     }
 }
 
