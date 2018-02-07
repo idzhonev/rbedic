@@ -16,10 +16,15 @@ to [KBE Dictionary](http://kbedic.sourceforge.net).
 ## Installation under Linux
 
 ### Building from source code
-You need Rust toolchain installed: [https://www.rust-lang.org](https://www.rust-lang.org).
+* You need Rust toolchain installed: [https://www.rust-lang.org](https://www.rust-lang.org).
 Successfully builds with `stable` and `nightly`.
 
-Clone repository and start build:
+* Under `debian` you will need these libraries:
+```
+apt-get install libgtk-3-dev libgdk3.0-cil-dev libcairo-dev libpango1.0-dev libgdk-pixbuf2.0-dev libatk1.0-dev libgio2.0-cil-dev libglib2.0-dev libcairo-gobject2
+```
+
+* Clone repository and start build:
 ```
 $ git clone https://github.com/idzhonev/rbedic
 $ cd rbedic
@@ -31,14 +36,14 @@ to folder `/usr/bin/` etc.
 
 ### Dictionary's database
 
-Get archive from [bedic data Releases](https://github.com/idzhonev/bedic_data-utf8/releases)
+* Get archive from [bedic data Releases](https://github.com/idzhonev/bedic_data-utf8/releases)
 or clone repository with database files:
 ```
 $ git clone https://github.com/idzhonev/bedic_data-utf8
 $ cd bedic_data-utf8
 ```
 
-Execute these commands (with root privileges):
+* Execute these commands (with root privileges):
 ```
 $ sudo mkdir -p /usr/local/share/bedic
 $ sudo cp en_bg-utf8.dat /usr/local/share/bedic/

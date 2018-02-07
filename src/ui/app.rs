@@ -224,7 +224,7 @@ impl App {
   This is RBEdic - Bulgarian-English two-way dictionary,
 written in Rust with GTK and analogous to KBE Dictionary.
 
-    Version: 0.1.0
+    Version: 0.1.1
 
     Web site: https://github.com/idzhonev/rbedic
   
