@@ -45,7 +45,7 @@ impl ConnectedApp {
 }
 
 impl App {
-    pub fn new() -> App {
+    pub fn new(history_file_path: &str, prevents_reading_history_file_bool: bool ) -> App {
         // Initialize GTK before proceeding.
         if gtk::init().is_err() {
             eprintln!("failed to initialize GTK Application");
@@ -75,17 +75,33 @@ impl App {
             main_quit();
             Inhibit(false)
         });
-
-        let history_dictdb = Rc::new(Mutex::new(Vec::new()));
-        let history_dictdb_unsorted = Rc::new(Mutex::new(Vec::new()));
-        let selection_isize = Rc::new(AtomicIsize::new(0));
-        let searched_hash = Rc::new(Mutex::new(HashMap::new()));
         info!(
             "Running RBEdic v{} with GTK v{}.{}",
             VERSION,
             gtk::get_major_version(),
             gtk::get_minor_version()
         );
+
+        let selection_isize = Rc::new(AtomicIsize::new(0));
+        let searched_hash = Rc::new(Mutex::new(HashMap::new()));
+
+        // Loading history from file
+        let mut vec_history_db: Vec<DictDB> = Vec::new();
+        if prevents_reading_history_file_bool {
+            debug!("Do not read history file.");
+        } else {
+            trace!("Reading the history file.");
+            vec_history_db = DictDB::new_history(&history_file_path);
+        }
+
+        let vec_history_db_clonned = vec_history_db.clone();
+        vec_history_db.sort();
+        let history_dictdb = Rc::new(Mutex::new(vec_history_db));
+
+        let history_dictdb_unsorted = Rc::new(Mutex::new(vec_history_db_clonned));
+
+
+
         // Return the application structure.
         App {
             window,
@@ -108,9 +124,9 @@ impl App {
         // External state to share across events.
         // Keep track of whether we are fullscreened or not.
         let fullscreen = Rc::new(AtomicBool::new(false));
+        let button_history = content_clonned.s_bar.history;
         let button_add_2_history = content_clonned.s_bar.add_2_history;
         {
-            let button_history = content_clonned.s_bar.history;
             button_history.set_sensitive(false);
             button_add_2_history.set_sensitive(false);
 
@@ -119,6 +135,33 @@ impl App {
             self.history_event();
             self.add_2_history_event(history_dictdb.clone(), history_dictdb_unsorted.clone());
             self.key_events(fullscreen);
+        }
+        {
+            // Enabled initially the history button, if history from file was loaded
+            let app_clonned = self.clone();
+            {
+                debug!("history_event: Clear searched_hash");
+                let mut searched_hash_locked = app_clonned.searched_hash.lock().unwrap();
+                searched_hash_locked.clear();
+            }
+            {
+                let mut history_dictdb_unsorted =
+                    app_clonned.history_dictdb_unsorted.lock().unwrap();
+                history_dictdb_unsorted.reverse();
+                trace!(
+                    "history_event: history_data -> {:?}",
+                    history_dictdb_unsorted
+                );
+                app_clonned.selection(&history_dictdb_unsorted, false, true);
+            }
+            {
+                let mut history_dictdb_unsorted =
+                    app_clonned.history_dictdb_unsorted.lock().unwrap();
+                history_dictdb_unsorted.reverse();
+            }
+            let content = self.content.clone();
+            let search_entry = content.s_bar.search_entry.clone();
+            search_entry.grab_focus();
         }
         // Load dictionaries
         let app = self;
@@ -145,7 +188,7 @@ impl App {
                                     // Success
                                     trace!("Search into DB is Ok: {:?}", vec_result);
                                     // Write to GUI
-                                    app_clonned.selection(&vec_result, false);
+                                    app_clonned.selection(&vec_result, false, false);
                                 }
                                 Err(vec_result_err) => {
                                     trace!(
@@ -156,7 +199,7 @@ impl App {
                                         button_add_2_history.set_sensitive(false);
                                     };
                                     // Write to GUI
-                                    app_clonned.selection(&vec_result_err, false);
+                                    app_clonned.selection(&vec_result_err, false, false);
                                 }
                             };
                         }
@@ -224,7 +267,7 @@ impl App {
   This is RBEdic - Bulgarian-English two-way dictionary,
 written in Rust with GTK and analogous to KBE Dictionary.
 
-    Version: 0.1.1
+    Version: 0.2.0
 
     Web site: https://github.com/idzhonev/rbedic
   
@@ -282,7 +325,7 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
                     "history_event: history_data -> {:?}",
                     history_dictdb_unsorted
                 );
-                app_clonned.selection(&history_dictdb_unsorted, true);
+                app_clonned.selection(&history_dictdb_unsorted, true, false);
             }
             {
                 let mut history_dictdb_unsorted =
@@ -355,6 +398,8 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
                     let iter2: TextIter = right_buff.get_end_iter();
                     let right_buff_text = right_buff.get_text(&iter1, &iter2, false).unwrap();
                     // Print to standard out
+                    // Warning: these dashes are used for field delimiter in
+                    // database.rs::parse_history()
                     println!("------------------------------------------------------------------------------");
                     println!("{}", right_buff_text);
                     let dictdb_entry = DictDB {
@@ -372,7 +417,10 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
     }
 
     #[inline(always)]
-    fn selection(&self, vec_dict_db: &Vec<DictDB>, history_mode: bool) {
+    fn selection(&self, vec_dict_db: &Vec<DictDB>, history_mode: bool, history_mode_starting: bool) {
+        let app1 = self.clone();
+        let app2 = self.clone();
+
         let content = &self.content;
         let content_clonned = content.clone();
 
@@ -385,14 +433,17 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
         let left_selection_clonned = left_selection.clone();
 
         let vec_dict_db_loop: &Vec<DictDB>;
-        trace!("selection: history_mode bool == {}", history_mode);
-        let app1 = self.clone();
+        trace!("selection: history_mode bool == {}; history_mode_starting bool = {}", history_mode, history_mode_starting);
         if history_mode {
             button_history.set_sensitive(false);
             button_add_2_history.set_sensitive(false);
             vec_dict_db_loop = vec_dict_db;
         } else {
-            button_history.set_sensitive(true);
+            if history_mode_starting {
+                button_history.set_sensitive(false);
+            } else {
+                button_history.set_sensitive(true);
+            }
             vec_dict_db_loop = vec_dict_db;
             {
                 let history_dictdb_locked = app1.history_dictdb.lock().unwrap();
@@ -406,9 +457,11 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
 
         // Fill searched_hash
         {
-            let mut j = 1;
+            let searched_hash = app1.searched_hash;
             trace!("selection: searched_hash -> MUTEX LOCK before for loop");
-            let mut searched_hash_locked = app1.searched_hash.lock().unwrap();
+            let mut searched_hash_locked = searched_hash.lock().unwrap();
+
+            let mut j = 1;
             debug!(
                 "selection: before for loop: searched_hash LEN == {}",
                 searched_hash_locked.len()
@@ -482,6 +535,7 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
             }
             // Fill searched_hash _END_
         }
+        {
 
         let selection_atomic_isize = self.selection_isize.clone();
         let selection_atomic_isize_1 = selection_atomic_isize.load(Ordering::SeqCst);
@@ -497,7 +551,6 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
         } else {
             // On change selected row
             let app = self.clone();
-            let app2 = self.clone();
             if history_mode {
                 button_add_2_history.set_sensitive(false);
             } else {
@@ -560,7 +613,7 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
                                                 };
                                             }
                                             Err(err) => {
-                                                trace!("selection: connect_changed: MUTEX LOCK before searched_hash ERROR -> {}", err);
+                                                debug!("selection: connect_changed: MUTEX LOCK before searched_hash ERROR -> {}", err);
                                             }
                                         };
                                     }
@@ -624,5 +677,6 @@ https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
             }
         }
         // selection _END_
+        }
     }
 }
