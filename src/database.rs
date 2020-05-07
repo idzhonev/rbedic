@@ -12,7 +12,7 @@ use regex::Regex;
 use std::cmp::Ordering::{self, Equal, Greater, Less};
 //use log;
 
-const PREFIX_NUMBER: usize = 200;
+const PREFIX_NUMBER: usize = 100;
 
 #[derive(Clone, Debug, Eq)]
 pub struct DictDB {
@@ -56,6 +56,36 @@ impl DictDB {
         //concatenated_dictionaries.sort();
         info!("Done");
         concatenated_dictionaries
+    }
+    /// Load database from history file
+    pub fn new_history(history_file_path: &str) -> Vec<DictDB> {
+        // read from history files
+        debug!("History file: {}", history_file_path);
+        let mut string_history = String::new();
+        // TODO: Add Windows support
+        {
+            info!("Loading history from file");
+            match File::open(history_file_path) {
+                Ok(mut file_history) => {
+                    file_history
+                        .read_to_string(&mut string_history)
+                        .expect("Unable to read history file");
+                },
+                Err(e) => {
+                    error!("Can not open history file: {:?}", e);
+                    return Vec::new();
+                }
+            };
+
+        }
+        info!("Parse the history file");
+        let vector_history = parse_history(&string_history);
+        info!(
+            "This history file contains {} elements",
+            vector_history.len()
+        );
+        info!("Done");
+        vector_history
     }
 
     #[inline(always)]
@@ -199,10 +229,30 @@ impl VecDictDB for Vec<DictDB> {
     }
 }
 
-/// Parse files
+/// Parse db files
 fn parse(string_data: &str) -> Vec<DictDB> {
     let mut vec_dict_db: Vec<DictDB> = Vec::new();
     let data: Vec<String> = string_data.split("^;").map(|s| s.to_string()).collect();
+    for i in &data {
+        lazy_static! {
+            static ref ITEM: Regex = Regex::new(r"^(.*)\n(.|\s)*").unwrap();
+        }
+        if ITEM.is_match(i) {
+            for cap in ITEM.captures(i) {
+                let dict_db = DictDB {
+                    word: cap[1].to_string(),
+                    translation: cap[0].to_string(),
+                };
+                vec_dict_db.push(dict_db);
+            }
+        }
+    }
+    vec_dict_db
+}
+/// Parse db files
+fn parse_history(string_data: &str) -> Vec<DictDB> {
+    let mut vec_dict_db: Vec<DictDB> = Vec::new();
+    let data: Vec<String> = string_data.split("------------------------------------------------------------------------------\n").map(|s| s.to_string()).collect();
     for i in &data {
         lazy_static! {
             static ref ITEM: Regex = Regex::new(r"^(.*)\n(.|\s)*").unwrap();

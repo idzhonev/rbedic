@@ -68,7 +68,7 @@ you can configure execution like this:
 $ rbedic >> ~/new_words.txt 2> /dev/null
 ```
 
-* Can make `.bashrc` aliases like these:
+* Can make `.bashrc` or a`.bash_aliases` liases like these:
 ```
 $ echo "alias rbedic='/usr/bin/rbedic > /dev/null 2>&1'" >> ~/.bashrc
 $ echo "alias hrbedic='/usr/bin/rbedic 2> /dev/null | tee -a ~/new_words.txt'" >> ~/.bashrc
@@ -78,6 +78,24 @@ $ source ~/.bashrc
 * Enable logging (can use `info, debug, trace`)
 ```
 $ RUST_LOG=trace target/release/rbedic
+```
+
+* The program reads `~/new_words.txt` on startup and populates history mode. For more options, run with `--help`:
+```
+$ rbedic --help
+Bulgarian-English two-way dictionary 
+
+USAGE:
+    rbedic [FLAGS] [OPTIONS]
+
+FLAGS:
+        --help       Prints help information
+    -n, --noread     Prevents from reading the history file on startup
+    -V, --version    Prints version information
+
+OPTIONS:
+    -h, --history <FILE>    Sets history file for reading.
+                            Default file is ~/new_words.txt
 ```
 
 
